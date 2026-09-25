@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="lt">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stendo Admin Panelė ⚙️</title>
+    <!-- Pridedame QR kodo biblioteką -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        :root {
+            --primary: #2c3e50;
+            --accent: #e74c3c;
+            --bg: #ecf0f1;
+            --card-bg: #ffffff;
+            --text: #2c3e50;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', sans-serif; }
+        body { background-color: var(--bg); color: var(--text); padding: 30px; display: flex; gap: 30px; }
+        
+        .panel { background: var(--card-bg); padding: 25px; border-radius: 15px; box-shadow: 0 5px 15px rgba(0,0,0,0.05); }
+        .control-panel { flex: 1; max-width: 400px; display: flex; flex-direction: column; gap: 20px; text-align: center; }
+        .leaderboard-panel { flex: 2; }
+
+        h2 { color: var(--primary); margin-bottom: 15px; padding-bottom: 10px; border-bottom: 2px solid #efefef; }
+        
+        input { width: 100%; padding: 12px; border: 2px solid #bdc3c7; border-radius: 8px; font-size: 14px; margin-bottom: 10px; }
+        button { width: 100%; padding: 12px; font-weight: bold; border-radius: 8px; cursor: pointer; border: none; color: white; margin-bottom: 10px; }
+        
+        .btn-primary { background: #3498db; }
+        .btn-primary:hover { background: #2980b9; }
+        .btn-danger { background: var(--accent); }
+        .btn-danger:hover { background: #c0392b; }
+
+        #qrcode { display: flex; justify-content: center; margin-top: 15px; padding: 15px; background: #f9f9f9; border-radius: 8px; min-height: 150px; align-items: center; }
+
+        .leaderboard-table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        .leaderboard-table th, .leaderboard-table td { padding: 12px; border-bottom: 1px solid #dee2e6; text-align: left; }
+        .leaderboard-table th { background: #34495e; color: white; }
+        tr:nth-child(even) { background-color: #f8f9fa; }
+        .top-1 { font-weight: bold; color: #f1c40f; }
+        .top-2 { font-weight: bold; color: #95a5a6; }
+        .top-3 { font-weight: bold; color: #d35400; }
+        
+        .refresh-tag { float: right; font-size: 12px; background: #2ecc71; color: white; padding: 3px 8px; border-radius: 10px; }
+    </style>
+</head>
+<body>
+
+    <!-- KAIRĖ: VALDYMAS IR QR KODAS -->
+    <div class="panel control-panel">
+        <h2>Stendo Valdymas</h2>
+        <div>
+            <label style="display:block; text-align:left; font-weight:bold; margin-bottom:5px;">Žaidimo URL (Nuoroda):</label>
+            <input type="text" id="game-url" placeholder="Įklijuokite jūsų paleisto žaidimo nuorodą">
+            <button class="btn-primary" onclick="generateQR()">Sugeneruoti Žaidimo QR Kodą</button>
+        </div>
+        
+        <div id="qrcode">Čia atsiras QR kodas skanavimui</div>
+        
+        <div style="margin-top: auto; border-top: 2px solid #efefef; padding-top: 20px;">
+            <h3>Pavojinga zona</h3>
+            <p style="font-size:12px; color:#7f8c8d; margin-bottom:10px;">Ištrina visus rezultatus iš duomenų bazės prieš pradedant renginį.</p>
+            <button class="btn-danger" onclick="clearFirebase()">IŠVALYTI VISUS REZULTATUS</button>
+        </div>
+    </div>
+
+    <!-- DEŠINĖ: REAL-TIME LYDERIAI -->
+    <div class="panel leaderboard-panel">
+        <h2>
+            Gyva Rezultatų Lentelė 
+            <span class="refresh-tag">Atnaujinama kas 5s</span>
+        </h2>
+        <table class="leaderboard-table">
+            <thead>
+                <tr>
+                    <th style="width: 80px;">Vieta</th>
+                    <th>Žaidėjas (Vardas Pavardė)</th>
+                    <th style="width: 150px;">Laikas</th>
+                </tr>
+            </thead>
+            <tbody id="admin-leaderboard-body">
+                <tr><td colspan="3" style="text-align:center; color:#7f8c8d;">Kraunami duomenys...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+<script>
+    const databaseUrl = "https://koreieciu-default-rtdb.europe-west1.firebasedatabase.app/";
+    let qrContainer = document.getElementById("qrcode");
+    let qrcodeObj = null;
+
+    function generateQR() {
+        let url = document.getElementById("game-url").value.trim();
+        if(!url) { alert("Pirmiausia įklijuokite žaidimo nuorodą!"); return; }
+        
+        qrContainer.innerHTML = "";
+        qrcodeObj = new QRCode(qrContainer, {
+            text: url,
+            width: 180,
+            height: 180,
+            colorDark : "#2c3e50",
+            colorLight : "#ffffff",
+            correctLevel : QRCode.CorrectLevel.H
+        });
+    }
+
+    function fetchLeaderboardAdmin() {
+        fetch(`${databaseUrl}scores.json`)
+            .then(res => res.json())
+            .then(data => {
+                const tbody = document.getElementById("admin-leaderboard-body");
+                tbody.innerHTML = "";
+                
+                if (!data) {
+                    tbody.innerHTML = `<tr><td colspan="3" style="text-align:center; color:#7f8c8d;">Lentelė tuščia. Laukiama pirmųjų žaidėjų!</td></tr>`;
+                    return;
+                }
+
+                let list = Object.keys(data).map(key => data[key]);
+                list.sort((a, b) => a.ms - b.ms); // Mažiausias laikas viršuje
+
+                list.forEach((entry, index) => {
+                    const tr = document.createElement("tr");
+                    let positionClass = "";
+                    if (index === 0) positionClass = "top-1";
+                    else if (index === 1) positionClass = "top-2";
+                    else if (index === 2) positionClass = "top-3";
+
+                    tr.innerHTML = `
+                        <td class="${positionClass}">#${index + 1}</td>
+                        <td style="font-weight: ${index < 3 ? 'bold' : 'normal'}">${entry.name}</td>
+                        <td style="font-family:monospace; font-weight:bold; color:${index < 3 ? '#e74c3c' : '#2c3e50'}">${entry.time}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            }).catch(err => console.error("Klaida sinchronizuojant duomenis:", err));
+    }
+
+    function clearFirebase() {
+        if(confirm("Ar tikrai norite visiškai ištrinti visus žaidėjų rezultatus? Šio veiksmo atšaukti neįmanoma.")) {
+            fetch(`${databaseUrl}scores.json`, { method: 'DELETE' })
+            .then(() => {
+                alert("Duomenų bazė sėkmingai išvalyta!");
+                fetchLeaderboardAdmin();
+            }).catch(err => alert("Klaida valant duomenis: " + err));
+        }
+    }
+
+    // Paleidžiame automatinį lentelės atnaujinimą kas 5 sekundes
+    fetchLeaderboardAdmin();
+    setInterval(fetchLeaderboardAdmin, 5000);
+</script>
+</body>
+</html>
